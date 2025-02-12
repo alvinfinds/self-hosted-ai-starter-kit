@@ -3,25 +3,67 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_storage
+      device: /storage/n8n_storage
       o: bind
   postgres_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_postgres
+      device: /storage/n8n_postgres
       o: bind
   ollama_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/models
+      device: /storage/models
       o: bind
   qdrant_storage:
     driver: local
     driver_opts:
       type: none
-      device: /Volumes/T7/Storage/n8n_qdrant_storage
+      device: /storage/n8n_qdrant_storage
+      o: bind
+  letsencrypt_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_letsencrypt
+      o: bind
+  letsencrypt_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_letsencrypt/data
+      o: bind
+  nginx_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_nginx_data
+      o: bind  
+  n8n_backup:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_storage/backup
+      o: bind
+  n8n_shared:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/n8n_storage/shared
+      o: bind
+  minio_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/minio_storage
+      o: bind
+  redis_storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /storage/redis_storage
       o: bind
 
 networks:
@@ -48,6 +90,7 @@ x-n8n: &service-n8n
   links:
     - postgres
 
+# Settings and configurations that are common for all containers
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
@@ -94,7 +137,7 @@ services:
       - "-c"
       - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
     volumes:
-      - ./n8n/backup:/backup
+      - n8n_backup:/backup
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,14 +145,14 @@ services:
   n8n:
     <<: *service-n8n
     container_name: n8n
+    networks: ['demo']
     restart: unless-stopped
     ports:
       - 5678:5678
-      - 443:443
     volumes:
       - n8n_storage:/home/node/.n8n
-      - ./n8n/backup:/backup
-      - ./shared:/data/shared
+      - n8n_backup:/backup
+      - n8n_shared:/data/shared
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,11 +196,81 @@ services:
     depends_on:
       - ollama-gpu
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: minio
+    networks: ['demo']
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER
+      - MINIO_ROOT_PASSWORD
+      - MINIO_SERVER_URL
+      - MINIO_BROWSER_REDIRECT_URL
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: server --console-address ":9001" /data/minio
+    volumes:
+      - minio_storage:/data
+
   nginx:
     image: 'jc21/nginx-proxy-manager:latest'
     restart: unless-stopped
+    networks: ['demo']
     ports:
-      - '81:81'
+      - 80:80
+      - 81:81
+      - 443:443
     volumes:
-      - ./data:/data
-      - ./letsencrypt:/etc/letsencrypt
+      - letsencrypt_data:/data
+      - letsencrypt_storage:/etc/letsencrypt
+      - nginx_data:/etc/nginx
+
+  redis:
+    container_name: redis
+    networks: ['demo']
+    image: docker.io/valkey/valkey:8-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    volumes:
+      - redis_storage:/data
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+      - DAC_OVERRIDE
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
+  searxng:
+    container_name: searxng
+    networks: ['demo']
+    image: docker.io/searxng/searxng:latest
+    restart: unless-stopped
+    ports:
+      - "6060:8080"    
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://${SEARXNG_HOSTNAME:-localhost}/
+      - UWSGI_WORKERS=${SEARXNG_UWSGI_WORKERS:-4}
+      - UWSGI_THREADS=${SEARXNG_UWSGI_THREADS:-4}
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
