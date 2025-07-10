@@ -217,18 +217,19 @@ services:
     volumes:
       - minio_storage:/data
 
-  nginx:
-    image: 'jc21/nginx-proxy-manager:latest'
-    restart: unless-stopped
-    networks: ['demo']
-    ports:
-      - 80:80
-      - 81:81
-      - 443:443
-    volumes:
-      - letsencrypt_data:/data
-      - letsencrypt_storage:/etc/letsencrypt
-      - nginx_data:/etc/nginx
+  # nginx service disabled
+  # nginx:
+  #   image: 'jc21/nginx-proxy-manager:latest'
+  #   restart: unless-stopped
+  #   networks: ['demo']
+  #   ports:
+  #     - 80:80
+  #     - 81:81
+  #     - 443:443
+  #   volumes:
+  #     - letsencrypt_data:/data
+  #     - letsencrypt_storage:/etc/letsencrypt
+  #     - nginx_data:/etc/nginx
 
   redis:
     container_name: redis
